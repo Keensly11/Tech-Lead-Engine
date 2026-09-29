@@ -65,14 +65,27 @@ class RawSignal(BaseModel):
 
 
 class NewsExtraction(BaseModel):
-    """What the LLM must return for a news item. Validated strictly."""
+    """What the LLM must return for a news item. Validated strictly.
 
-    is_relevant: bool = Field(description="True only if a specific company is doing something that implies buying IT/AV equipment")
-    company_name: str | None = None
+    Field order matters: under constrained decoding the model writes fields in
+    schema order, so facts come first and the verdict (is_relevant, confidence)
+    last. With the verdict first, llama3.1:8b answered false before reading
+    closely and skipped everything else.
+    """
+
+    company_name: str = Field(default="", description="Company exactly as named in the text; empty string if none")
     company_domain: str | None = None
     segment: Segment = "unknown"
     city: str | None = None
     country: str | None = None
     signal_type: SignalType = "other"
     evidence_quote: str | None = Field(default=None, description="Exact sentence from the text supporting the signal")
+    is_relevant: bool = Field(default=False, description="True only if a specific company is doing something that implies buying IT/AV equipment")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    @classmethod
+    def llm_schema(cls) -> dict:
+        """JSON schema for constrained decoding, with every field required so none can be skipped."""
+        schema = cls.model_json_schema()
+        schema["required"] = list(schema["properties"])
+        return schema

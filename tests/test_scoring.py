@@ -36,6 +36,19 @@ def test_intent_noisy_or_combines_without_exceeding_one():
     assert one < two < 1.0
 
 
+def test_many_reports_of_one_event_count_once():
+    one = score_company(UAE_FILM, [sig("new_office", 4)], [], now=NOW)
+    echoed = score_company(UAE_FILM, [sig("new_office", d) for d in (4, 5, 6, 6)], [], now=NOW)
+    assert echoed.intent == pytest.approx(one.intent)
+    assert any("+3 more report" in line for line in echoed.explanation)
+
+
+def test_same_type_events_far_apart_both_count():
+    one = score_company(UAE_FILM, [sig("new_office", 2)], [], now=NOW).intent
+    two = score_company(UAE_FILM, [sig("new_office", 2), sig("new_office", 60)], [], now=NOW).intent
+    assert two > one
+
+
 def test_old_signals_count_less_and_ancient_ones_not_at_all():
     fresh = score_company(UAE_FILM, [sig("new_office", 1)], [], now=NOW).intent
     stale = score_company(UAE_FILM, [sig("new_office", 60)], [], now=NOW).intent

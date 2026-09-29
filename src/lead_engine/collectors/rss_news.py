@@ -68,7 +68,8 @@ class RssNewsCollector:
         return any(k in text for k in self.keywords)
 
     def collect(self) -> Iterator[RawSignal]:
-        client = httpx.Client(timeout=120)
+        # Generous timeout: the first call also loads the model into GPU memory.
+        client = httpx.Client(timeout=300)
         for feed in self.cfg["rss_feeds"]:
             parsed = _fetch(client, feed["url"])
             if parsed is None:

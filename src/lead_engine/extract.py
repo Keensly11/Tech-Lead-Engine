@@ -26,6 +26,7 @@ it will soon buy such equipment (new office, expansion, hiring many people, new 
 funding, film/TV production or studio launch, IT tender, IT/data-centre hiring).
 
 Rules:
+- company_name must be the company's name exactly as written in the text (e.g. "EQT", not "Global Private Markets Firm").
 - If no specific company is named, or the company is a government ministry announcing policy, is_relevant=false.
 - evidence_quote MUST be copied exactly from the text.
 - Do not invent a domain. Leave company_domain null unless it appears in the text.
@@ -47,15 +48,21 @@ def _evidence_is_grounded(quote: str | None, source_text: str) -> bool:
     return squash(quote)[:80] in squash(source_text)
 
 
+def _name_is_grounded(name: str, source_text: str) -> bool:
+    """The company must be named in the article, which blocks invented companies."""
+    name = name.strip()
+    return len(name) >= 2 and name.lower() in source_text.lower()
+
+
 def extract_from_news(title: str, text: str, client: httpx.Client | None = None) -> NewsExtraction | None:
-    client = client or httpx.Client(timeout=120)
+    client = client or httpx.Client(timeout=300)
     try:
         resp = client.post(
             f"{env('OLLAMA_URL', 'http://localhost:11434')}/api/chat",
             json={
                 "model": env("OLLAMA_MODEL", "llama3.1:8b"),
                 "messages": [{"role": "user", "content": PROMPT.format(title=title, text=text)}],
-                "format": NewsExtraction.model_json_schema(),
+                "format": NewsExtraction.llm_schema(),
                 "stream": False,
                 "options": {"temperature": 0},
             },
@@ -67,7 +74,10 @@ def extract_from_news(title: str, text: str, client: httpx.Client | None = None)
         log.warning("extraction failed for %r: %s", title, exc)
         return None
 
-    if not result.is_relevant or not result.company_name:
+    if not result.is_relevant:
+        return None
+    if not _name_is_grounded(result.company_name, f"{title}\n{text}"):
+        log.info("company %r not named in source, skipped: %s", result.company_name, title)
         return None
     if result.confidence < MIN_CONFIDENCE:
         log.info("low confidence (%.2f), skipped: %s", result.confidence, title)

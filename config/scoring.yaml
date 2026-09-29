@@ -17,6 +17,9 @@ signal_weights:
 recency_half_life_days: 30
 # Signals older than this are ignored entirely.
 max_signal_age_days: 180
+# Same-type signals within this many days count as one event (e.g. several
+# outlets covering one office opening), scored by the strongest report.
+event_window_days: 14
 
 # Contact confidence by how we got the email address.
 contact_weights:
