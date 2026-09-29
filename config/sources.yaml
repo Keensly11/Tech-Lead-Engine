@@ -1,0 +1,30 @@
+# RSS/Atom feeds to scan for buying signals. Prefer official feeds and APIs;
+# do not scrape sites whose terms forbid it (e.g. LinkedIn).
+# Replace these with feeds you have checked. Google News RSS search URLs work well:
+#   https://news.google.com/rss/search?q=<query>&hl=en-AE&gl=AE&ceid=AE:en
+rss_feeds:
+  - name: uae_new_office
+    url: "https://news.google.com/rss/search?q=%22new+office%22+Dubai+OR+%22Abu+Dhabi%22&hl=en-AE&gl=AE&ceid=AE:en"
+  - name: uae_funding
+    url: "https://news.google.com/rss/search?q=UAE+startup+raises+funding&hl=en-AE&gl=AE&ceid=AE:en"
+  - name: uae_film_production
+    url: "https://news.google.com/rss/search?q=film+production+Abu+Dhabi+OR+Dubai+studio&hl=en-AE&gl=AE&ceid=AE:en"
+
+# Cheap keyword pre-filter before spending LLM calls. An item must match at
+# least one keyword to be sent for extraction.
+prefilter_keywords:
+  - office
+  - headquarters
+  - expands
+  - expansion
+  - launch
+  - opens
+  - raises
+  - funding
+  - hiring
+  - studio
+  - production
+  - filming
+  - tender
+  - licence
+  - license

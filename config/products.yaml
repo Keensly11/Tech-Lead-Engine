@@ -1,0 +1,25 @@
+# What we sell, and which signals make each product line relevant.
+# Used to tell sales which product line to lead with (and later by the email drafter).
+
+company:
+  name: "YOUR COMPANY NAME"
+  website: "https://example.com"
+  phone: "+971 00 000 0000"
+  email: "sales@example.com"
+
+product_lines:
+  laptops_desktops:
+    label: "Laptops & desktops"
+    signals: [hiring_surge, new_office, new_company, funding_round]
+  peripherals:
+    label: "Monitors, docks & peripherals"
+    signals: [hiring_surge, new_office, new_company]
+  servers_networking:
+    label: "Servers, storage & networking"
+    signals: [it_hiring, new_office, it_tender]
+  cameras_av:
+    label: "Cameras, lenses & AV equipment"
+    signals: [production_launch]
+  workstations:
+    label: "Editing & rendering workstations"
+    signals: [production_launch]

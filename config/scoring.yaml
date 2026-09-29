@@ -1,0 +1,38 @@
+# Scoring configuration. Every number here is a hypothesis: the feedback loop
+# (Week 6) compares these against real reply/meeting rates and suggests updates.
+
+# Intent: how strongly each signal type suggests a purchase soon.
+# Each signal contributes weight * recency_decay; signals combine via noisy-OR.
+signal_weights:
+  it_tender: 0.90          # public tender for IT/AV equipment: explicit demand
+  new_office: 0.70         # new office / relocation / expansion
+  production_launch: 0.70  # film/TV production, new studio, big event
+  hiring_surge: 0.60       # many open roles → new laptops/peripherals
+  new_company: 0.55        # newly licensed / free-zone registered
+  funding_round: 0.50
+  it_hiring: 0.50          # IT / infra / data-centre roles → servers, networking
+  other: 0.10
+
+# Days after which a signal counts for half as much.
+recency_half_life_days: 30
+# Signals older than this are ignored entirely.
+max_signal_age_days: 180
+
+# Contact confidence by how we got the email address.
+contact_weights:
+  verified: 0.95   # found on company site / confirmed by the person
+  pattern: 0.60    # guessed from firstname.lastname@domain pattern
+  generic: 0.40    # info@ / sales@ / hello@
+  none: 0.0
+
+# Fit sub-weights (must sum to 1).
+fit_weights:
+  segment: 0.60
+  size: 0.25
+  location: 0.15
+
+# Routing thresholds on priority = fit * intent.
+routing:
+  high_priority: 0.45       # → draft + sales review
+  review_priority: 0.20     # → human looks, may enrich more
+  min_contact_to_email: 0.40  # below this, a high lead goes to review ("find a contact")

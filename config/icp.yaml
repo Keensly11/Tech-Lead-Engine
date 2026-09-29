@@ -1,0 +1,25 @@
+# Ideal customer profile: who we sell to.
+
+segments:
+  tech: 1.0            # software, IT services, startups
+  film_media: 1.0      # production houses, studios, broadcasters, agencies
+  corporate: 0.8       # offices of mid/large companies
+  education: 0.7
+  government: 0.7
+  events: 0.7
+  retail: 0.4
+  other: 0.3
+  unknown: 0.5
+
+# Employee count bands → size score. Tiny companies buy little; huge ones
+# usually have locked-in vendor contracts. Mid-market is the sweet spot.
+size_bands:
+  - {max: 10, score: 0.3}
+  - {max: 50, score: 0.7}
+  - {max: 500, score: 1.0}
+  - {max: 5000, score: 0.8}
+  - {max: 1000000000, score: 0.5}
+unknown_size_score: 0.5
+
+target_countries: ["AE", "UAE", "United Arab Emirates"]
+target_cities: ["Dubai", "Abu Dhabi", "Sharjah", "Ajman", "Ras Al Khaimah", "Fujairah", "Umm Al Quwain"]

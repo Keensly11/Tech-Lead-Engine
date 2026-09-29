@@ -1,0 +1,36 @@
+services:
+  # Pipeline database
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: lead
+      POSTGRES_PASSWORD: lead
+      POSTGRES_DB: lead_engine
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+
+  # Local Odoo Community for development / portfolio demo (full external API).
+  # First run: open http://localhost:8069, create database "odoo", install the CRM app,
+  # then generate an API key under Preferences > Account Security.
+  odoo-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: odoo
+      POSTGRES_DB: postgres
+    volumes: [odoodb:/var/lib/postgresql/data]
+
+  odoo:
+    image: odoo:17.0
+    depends_on: [odoo-db]
+    environment:
+      HOST: odoo-db
+      USER: odoo
+      PASSWORD: odoo
+    ports: ["8069:8069"]
+    volumes: [odoodata:/var/lib/odoo]
+
+volumes:
+  pgdata:
+  odoodb:
+  odoodata:
