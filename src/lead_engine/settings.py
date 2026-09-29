@@ -25,4 +25,16 @@ def load_config(name: str) -> dict:
         return yaml.safe_load(f)
 
 
-DATABASE_URL = env("DATABASE_URL", f"sqlite:///{ROOT / 'lead_engine.db'}")
+def _database_url() -> str:
+    url = env("DATABASE_URL", "sqlite:///lead_engine.db")
+    # Relative SQLite paths resolve against the project root, not the caller's cwd,
+    # so the CLI and the MCP server (launched by Claude Desktop from elsewhere) share one DB.
+    prefix = "sqlite:///"
+    if url.startswith(prefix) and url != "sqlite:///:memory:":
+        path = Path(url[len(prefix):])
+        if not path.is_absolute():
+            return f"{prefix}{(ROOT / path).as_posix()}"
+    return url
+
+
+DATABASE_URL = _database_url()

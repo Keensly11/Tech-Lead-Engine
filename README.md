@@ -75,14 +75,16 @@ Claude Desktop config (`claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
-    "lead-engine": {
-      "command": "C:\\path\\to\\lead-engine\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "mcp_server.server"],
-      "cwd": "C:\\path\\to\\lead-engine"
+    "tech-lead-engine": {
+      "command": "C:\\path\\to\\Tech-Lead-Engine\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\path\\to\\Tech-Lead-Engine\\mcp_server\\server.py"]
     }
   }
 }
 ```
+Claude Desktop doesn't set a working directory, so use absolute paths. Relative SQLite
+paths in `.env` resolve against the project root, so the CLI and MCP server share one database.
+Fully quit Claude Desktop (from the system tray) and reopen it to load the server.
 Tools: `search_leads`, `get_lead`, `explain_score`, `rescore`, `log_outcome`, `pipeline_status`.
 Example prompts: "top film leads and why", "log that Northwind replied, meeting booked".
 
