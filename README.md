@@ -30,6 +30,25 @@ licences, film/TV productions, IT tenders and IT/data-centre hiring.
 
 Every score carries a line-by-line explanation with source URLs.
 
+## Contact finder
+Promising leads with no usable contact stay in **review**. `lead-engine find-contacts`
+(or `run --find-contacts`) searches for public business emails:
+
+1. **Website.** Uses the known domain, or guesses candidates from the name (`braindigits.com`,
+   `qamarcloud.ae`…). A guess is accepted only if the homepage title names the company and
+   the page isn't parked. Single-word names ("EQT") aren't guessed because they're too
+   ambiguous; use `set-domain` instead.
+2. **Crawl.** At most 6 pages on the company's own site (home, contact, about, team),
+   honouring `robots.txt`, with a delay between requests. Sites behind bot protection are
+   reported for a human to check, never bypassed.
+3. **Emails.** Extracted from mailto links, plain text, `[at]` obfuscation and Cloudflare email
+   protection. Only addresses on the company's domain are kept, and careers, HR, no-reply and
+   privacy inboxes are dropped. Personal emails are **never guessed**, because guessed
+   addresses bounce and damage the sending domain's reputation.
+
+A lead that gains a usable contact is rescored and can move from review to high. Each
+company is searched at most once every 30 days.
+
 ## Reliability
 - **Validated LLM output.** News extraction must match a Pydantic schema, meet a
   confidence threshold, and quote evidence that actually appears in the article.
@@ -85,11 +104,14 @@ Claude Desktop config (`claude_desktop_config.json`):
 Claude Desktop doesn't set a working directory, so use absolute paths. Relative SQLite
 paths in `.env` resolve against the project root, so the CLI and MCP server share one database.
 Fully quit Claude Desktop (from the system tray) and reopen it to load the server.
-Tools: `search_leads`, `get_lead`, `explain_score`, `rescore`, `log_outcome`, `pipeline_status`.
-Example prompts: "top film leads and why", "log that Northwind replied, meeting booked".
+Tools: `search_leads`, `get_lead`, `explain_score`, `rescore`, `find_contacts`, `set_domain`,
+`add_contact`, `log_outcome`, `pipeline_status`.
+Example prompts: "top film leads and why", "find contacts for the review leads",
+"EQT's website is eqtgroup.com", "log that Northwind replied, meeting booked".
 
 ## Roadmap
 1. ~~MVP: sample + RSS collectors, dedup, scoring, routing, local/Odoo sinks, MCP (read + outcomes)~~
+1. ~~Contact finder: domain discovery, polite crawl, email extraction, manual set_domain / add_contact~~
 2. Eval set: hand-label 100 real leads (`eval/`) and measure precision@20 of the scorer
 3. Email drafting grounded in evidence + fact-check + approval via Odoo stage
 4. Sender: dedicated subdomain, SPF/DKIM/DMARC, daily caps, suppression list, 2 follow-ups max

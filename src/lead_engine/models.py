@@ -32,6 +32,8 @@ class Company(Base):
     city: Mapped[str | None] = mapped_column(String(100), nullable=True)
     country: Mapped[str | None] = mapped_column(String(100), nullable=True)
     employee_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    domain_source: Mapped[str | None] = mapped_column(String(20), nullable=True)  # signal | guessed | manual
+    contact_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     signals: Mapped[list["Signal"]] = relationship(back_populates="company", cascade="all, delete-orphan")

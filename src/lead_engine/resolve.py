@@ -81,6 +81,7 @@ def resolve_company(session: Session, raw: RawSignal) -> Company:
     # Enrich blanks only: never overwrite known data with a weaker source.
     if domain and not company.domain:
         company.domain = domain
+        company.domain_source = "signal"
     if raw.segment != "unknown" and company.segment in (None, "unknown"):
         company.segment = raw.segment
     company.city = company.city or raw.city

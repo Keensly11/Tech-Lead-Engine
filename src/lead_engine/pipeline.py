@@ -1,4 +1,4 @@
-"""The pipeline: collect → resolve → store signal → rescore → route → export.
+"""The pipeline: collect → resolve → store signal → rescore → find contacts → route → export.
 
 Every step is idempotent: re-running on the same input produces no duplicate
 signals, companies or CRM leads.
@@ -7,17 +7,20 @@ signals, companies or CRM leads.
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lead_engine.collectors import COLLECTORS
+from lead_engine.contacts import ContactSearch, find_contacts
 from lead_engine.models import Company, Contact, Export, Score, Signal
-from lead_engine.resolve import normalize_name, resolve_company
+from lead_engine.resolve import normalize_domain, normalize_name, resolve_company
 from lead_engine.router import route
 from lead_engine.schemas import RawSignal
 from lead_engine.scoring import CompanyFacts, SignalFacts, score_company
+from lead_engine.settings import load_config
 from lead_engine.sinks import LeadContact, LeadPayload, LeadSink
 
 log = logging.getLogger(__name__)
@@ -31,6 +34,7 @@ class RunStats:
     new_signals: int = 0
     duplicate_signals: int = 0
     rescored: int = 0
+    contact_searches: int = 0
     exported: int = 0
     unchanged: int = 0
     failed_exports: list[str] = field(default_factory=list)
@@ -131,7 +135,78 @@ def export(session: Session, sink: LeadSink, company: Company) -> str:
     return "exported"
 
 
-def run(session: Session, sources: list[str], sink: LeadSink | None = None) -> RunStats:
+def _aware(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def set_domain(session: Session, company: Company, domain: str, source: str) -> str | None:
+    """Assign a website. Returns an error message instead if it belongs to another company."""
+    domain = normalize_domain(domain)
+    if not domain:
+        return "not a valid company domain"
+    owner = session.scalar(select(Company).where(Company.domain == domain, Company.id != company.id))
+    if owner:
+        return f"{domain} already belongs to company {owner.id} ({owner.name}): probably the same company"
+    company.domain, company.domain_source = domain, source
+    session.flush()
+    return None
+
+
+def enrich_contacts(session: Session, company: Company, client: httpx.Client | None = None) -> ContactSearch:
+    """Find a website and public emails for one company, store them and rescore."""
+    search = find_contacts(company.name, company.domain, client=client)
+    if search.domain and not company.domain:
+        error = set_domain(session, company, search.domain, search.domain_source or "guessed")
+        if error:
+            search.notes.append(error)
+            search.contacts = []
+
+    known = {c.email for c in company.contacts}
+    for c in search.contacts:
+        if c.email not in known:
+            session.add(Contact(company_id=company.id, **c.model_dump()))
+            known.add(c.email)
+    company.contact_checked_at = datetime.now(timezone.utc)
+    rescore(session, company)
+    return search
+
+
+def leads_needing_contacts(session: Session, recheck_days: int = 30,
+                           company_ids: list[int] | None = None) -> list[Company]:
+    """Promising leads (high/review) with no usable contact that weren't checked recently. Best first."""
+    min_contact = load_config("scoring")["routing"]["min_contact_to_email"]
+    cutoff = datetime.now(timezone.utc) - timedelta(days=recheck_days)
+    q = select(Company).join(Score).where(Score.route.in_(EXPORT_ROUTES), Score.contact < min_contact)
+    if company_ids is not None:
+        q = q.where(Company.id.in_(company_ids))
+    companies = session.scalars(q.order_by(Score.priority.desc())).all()
+    return [c for c in companies if c.contact_checked_at is None or _aware(c.contact_checked_at) < cutoff]
+
+
+def find_contacts_for_leads(session: Session, limit: int = 20, recheck_days: int = 30,
+                            company_ids: list[int] | None = None,
+                            client: httpx.Client | None = None) -> list[dict]:
+    client = client or httpx.Client()
+    report = []
+    for company in leads_needing_contacts(session, recheck_days, company_ids)[:limit]:
+        try:
+            search = enrich_contacts(session, company, client)
+            session.commit()
+        except Exception as exc:  # one broken website must not stop the batch
+            session.rollback()
+            log.exception("contact search failed for %s", company.name)
+            report.append({"company": company.name, "error": str(exc)})
+            continue
+        report.append({
+            "id": company.id, "company": company.name, "domain": company.domain,
+            "emails": [f"{c.email} ({c.kind})" for c in search.contacts],
+            "route": company.score.route, "notes": search.notes,
+        })
+    return report
+
+
+def run(session: Session, sources: list[str], sink: LeadSink | None = None,
+        find_contacts: bool = False) -> RunStats:
     stats = RunStats()
     touched: dict[int, Company] = {}
 
@@ -153,6 +228,9 @@ def run(session: Session, sources: list[str], sink: LeadSink | None = None) -> R
         rescore(session, company)
         stats.rescored += 1
     session.commit()
+
+    if find_contacts and touched:
+        stats.contact_searches = len(find_contacts_for_leads(session, limit=len(touched), company_ids=list(touched)))
 
     if sink is not None:
         for company in touched.values():

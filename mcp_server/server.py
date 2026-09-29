@@ -10,8 +10,8 @@ from mcp.server.mcpserver import MCPServer
 
 from lead_engine import pipeline, queries
 from lead_engine.db import SessionLocal, init_db
-from lead_engine.models import Company
-from lead_engine.schemas import Outcome
+from lead_engine.models import Company, Contact
+from lead_engine.schemas import Outcome, RawContact
 
 mcp = MCPServer("lead-engine")
 init_db()
@@ -58,6 +58,55 @@ def rescore(company_id: int) -> dict:
         s.commit()
         return {"route": score.route, "priority": score.priority, "fit": score.fit,
                 "intent": score.intent, "contact": score.contact}
+
+
+@mcp.tool()
+def find_contacts(company_id: int | None = None, limit: int = 5) -> list[dict]:
+    """Search company websites for public business emails, then rescore.
+
+    With company_id, searches that company now. Without it, searches the best
+    high/review leads that have no usable contact. Only reads each company's own
+    site (≤6 pages, robots.txt honoured) and never guesses personal emails.
+    """
+    with SessionLocal() as s:
+        ids = [company_id] if company_id is not None else None
+        report = pipeline.find_contacts_for_leads(s, limit=limit, recheck_days=0 if ids else 30, company_ids=ids)
+        return report or [{"note": "nothing to search: lead has a usable contact, is archived, or was searched recently"}]
+
+
+@mcp.tool()
+def set_domain(company_id: int, domain: str) -> dict:
+    """Set a company's website by hand (e.g. when the name is too ambiguous to guess), then search it for contacts."""
+    with SessionLocal() as s:
+        company = s.get(Company, company_id)
+        if company is None:
+            return {"error": f"no company with id {company_id}"}
+        error = pipeline.set_domain(s, company, domain, "manual")
+        if error:
+            return {"error": error}
+        s.commit()
+        report = pipeline.find_contacts_for_leads(s, recheck_days=0, company_ids=[company_id])
+        return report[0] if report else {"company": company.name, "domain": company.domain,
+                                         "note": "not searched: lead already has a usable contact or is archived"}
+
+
+@mcp.tool()
+def add_contact(company_id: int, email: str, name: str | None = None, role: str | None = None) -> dict:
+    """Add a contact a salesperson confirmed (e.g. from a call or business card). Stored as verified."""
+    with SessionLocal() as s:
+        company = s.get(Company, company_id)
+        if company is None:
+            return {"error": f"no company with id {company_id}"}
+        try:
+            contact = RawContact(email=email, kind="verified", name=name, role=role, source_url="manual")
+        except ValueError as exc:
+            return {"error": str(exc)}
+        if any(c.email == contact.email for c in company.contacts):
+            return {"error": f"{contact.email} is already a contact"}
+        s.add(Contact(company_id=company.id, **contact.model_dump()))
+        score = pipeline.rescore(s, company)
+        s.commit()
+        return {"added": contact.email, "route": score.route, "contact": score.contact, "priority": score.priority}
 
 
 @mcp.tool()
