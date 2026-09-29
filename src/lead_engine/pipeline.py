@@ -137,6 +137,8 @@ def run(session: Session, sources: list[str], sink: LeadSink | None = None) -> R
 
     for source in sources:
         collector = COLLECTORS[source]()
+        if hasattr(collector, "skip_url"):
+            collector.skip_url = lambda url: session.scalar(select(Signal.id).where(Signal.url == url)) is not None
         for raw in collector.collect():
             stats.collected += 1
             company, is_new = ingest(session, raw)
