@@ -1,4 +1,4 @@
-# Lead Engine
+# Tech Lead Engine
 
 Signal-based B2B lead discovery for a UAE tech reseller (laptops, servers, peripherals,
 cameras/AV). It finds companies showing **buying signals**, scores them with **three
