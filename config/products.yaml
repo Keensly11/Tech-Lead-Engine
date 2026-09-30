@@ -11,19 +11,27 @@ company:
   email: "sales@example.com"
   signature: "The YOUR COMPANY NAME Sales Team"
 
+# signals:  signal types that make a line relevant in general.
+# keywords: equipment words that, when the article names them (e.g. a tender for
+#           "400 laptops and 25 displays"), make the email pitch exactly those lines.
 product_lines:
   laptops_desktops:
     label: "Laptops & desktops"
-    signals: [hiring_surge, new_office, new_company, funding_round]
+    signals: [hiring_surge, new_office, new_company, funding_round, it_tender]
+    keywords: [laptop, laptops, notebook, notebooks, desktop, desktops, computer, computers, pc, pcs]
   peripherals:
     label: "Monitors, docks & peripherals"
     signals: [hiring_surge, new_office, new_company]
+    keywords: [monitor, monitors, display, displays, screen, screens, dock, docks, keyboard, keyboards, peripheral, peripherals, printer, printers]
   servers_networking:
     label: "Servers, storage & networking"
     signals: [it_hiring, new_office, it_tender]
+    keywords: [server, servers, storage, network, networking, switch, switches, firewall, data centre, data center, wifi, wi-fi]
   cameras_av:
     label: "Cameras, lenses & AV equipment"
     signals: [production_launch]
+    keywords: [camera, cameras, lens, lenses, av, audio-visual, audiovisual, projector, projectors, microphone, microphones, video wall]
   workstations:
     label: "Editing & rendering workstations"
     signals: [production_launch]
+    keywords: [workstation, workstations, editing, rendering, post-production, vfx]

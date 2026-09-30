@@ -41,6 +41,16 @@ def normalize_domain(value: str | None) -> str | None:
     return host
 
 
+def display_name(name: str) -> str:
+    """'Duneline Logistics L.L.C' → 'Duneline Logistics'. Keeps original casing, for greetings."""
+    # "Company"/"Co" are often part of the brand ("The Boring Company"), so they stay.
+    strip = (_LEGAL_SUFFIXES - {"co", "company", "establishment"}) | {"l.l.c", "fz-llc"}
+    tokens = name.strip().rstrip(".,").split()
+    while len(tokens) > 1 and tokens[-1].lower().strip(".,-") in strip:
+        tokens.pop()
+    return " ".join(tokens).rstrip(",")
+
+
 def normalize_name(name: str) -> str:
     """'ACME Technologies FZ-LLC.' → 'acme technologies'."""
     name = name.lower().replace("&", " and ")

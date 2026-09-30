@@ -113,11 +113,57 @@ def test_generate_draft_uses_template_and_signal(session):
     assert d.status == "draft" and d.issues == []
     assert d.to_email == "maya.r@falconpixel.example"
     assert d.body.startswith("Hi Maya,")
-    assert "cameras, lenses & av equipment and editing & rendering workstations" in d.body
+    assert "cameras, lenses & AV equipment and editing & rendering workstations" in d.body
     assert "https://gulftech.example" in d.body and 'Reply "unsubscribe"' in d.body
     assert "(news.example)" in d.body
     # the prompt is grounded in the strongest signal, with the publisher suffix stripped
     assert "begins filming feature series at new Abu Dhabi soundstage" in llm.calls[0]
+
+
+def test_filler_and_speculation_are_flagged():
+    c = copy(opener="Congrats on the new Abu Dhabi soundstage, a strategic move. We're excited to see it.")
+    issues = check_copy(c, SOURCE, PRODUCTS)
+    assert any("'strategic'" in i for i in issues) and any("'excited'" in i for i in issues)
+
+
+def test_mentioned_products_from_tender_text():
+    text = "Northwind Academy tender: supply of 400 student laptops and classroom displays"
+    assert drafting.mentioned_products(text) == ["Laptops & desktops", "Monitors, docks & peripherals"]
+    assert drafting.mentioned_products("EQT opens Abu Dhabi office") == []
+    # whole words only: "average" must not match the "av" keyword
+    assert drafting.mentioned_products("an average expansion") == []
+
+
+def test_tender_draft_pitches_what_the_tender_names(session):
+    northwind = session.scalar(select(Company).where(Company.name == "Northwind Academy"))
+    llm = fake_llm(copy(opener="Saw the tender for 400 student laptops.", subject="Your laptop tender",
+                        focus=("Servers, storage & networking",)))  # model picks the wrong line
+    report = drafting.draft_leads(session, company_ids=[northwind.id], llm=llm)
+    body = session.get(Draft, report[0]["draft_id"]).body
+    assert "a UAE supplier of laptops & desktops and monitors, docks & peripherals" in body
+    assert "servers" not in body
+    assert "Products we could offer: Laptops & desktops; Monitors, docks & peripherals" in llm.calls[0]
+
+
+def test_greeting_drops_legal_suffix_and_acronyms_keep_capitals(session):
+    duneline = session.scalar(select(Company).where(Company.domain == "duneline.example"))
+    report = drafting.draft_leads(session, company_ids=[duneline.id], llm=fake_llm())
+    body = session.get(Draft, report[0]["draft_id"]).body
+    assert body.startswith("Hello Duneline Logistics team,")
+    assert "because Duneline Logistics was in the news" in body
+    assert drafting.label_in_sentence("Cameras, lenses & AV equipment") == "cameras, lenses & AV equipment"
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("Duneline Logistics L.L.C", "Duneline Logistics"),
+    ("Falcon Pixel Studios FZ-LLC", "Falcon Pixel Studios"),
+    ("Qamar Cloud Technologies FZCO", "Qamar Cloud Technologies"),
+    ("The Boring Company", "The Boring Company"),
+    ("EQT", "EQT"),
+])
+def test_display_name(name, expected):
+    from lead_engine.resolve import display_name
+    assert display_name(name) == expected
 
 
 def test_footer_names_publisher_from_headline_suffix():

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from lead_engine.llm import ollama_json
 from lead_engine.models import Company, Contact, Draft, Score, Signal
+from lead_engine.resolve import display_name
 from lead_engine.schemas import DraftCopy
 from lead_engine.scoring import recency_decay
 from lead_engine.settings import CONFIG_DIR, load_config
@@ -44,6 +45,12 @@ BANNED = re.compile(
     r"special offer|deal|promo(tion)?|save \d+)\b|%|\baed\s?\d|\$\s?\d|\busd\s?\d",
     re.I,
 )
+# Empty or speculative phrases: they add nothing, or claim things the article doesn't say.
+FILLER = re.compile(
+    r"\b(strategic|excited|curious|seamless(ly)?|cutting[- ]edge|state[- ]of[- ]the[- ]art|"
+    r"world[- ]class|synerg\w*|game[- ]chang\w*|leverag\w*|increasing demands|come to life)\b",
+    re.I,
+)
 PLACEHOLDER_MARKERS = ("YOUR COMPANY NAME", "example.com", "+971 00 000 0000")
 
 PROMPT = """You write the opening of a short B2B sales email for {sender}, a UAE supplier of IT and AV equipment.
@@ -55,9 +62,11 @@ Products we could offer: {labels}
 
 Write:
 - product_focus: the 1-2 most relevant product labels from the list above, copied exactly.
-- opener: 1-2 friendly, specific sentences that mention their news and connect it to equipment they may need.
-  Use ONLY facts from the news above. No prices, discounts, offers, promises, or claims about us.
-  No greeting (no "Hi"), no sign-off, no company name of ours.
+- opener: exactly 2 short sentences.
+  Sentence 1 restates their news plainly, using only facts above (e.g. "Congratulations on opening your new Abu Dhabi office.").
+  Sentence 2 links that news to the equipment in product_focus (e.g. "New offices usually mean new laptops and screens for the team.").
+  No opinions or guesses about their strategy, no "we're excited", no prices, discounts, offers or promises.
+  No greeting, no sign-off, no company name of ours.
 - subject: under 70 characters, sentence case, specific to their news, plain and not salesy, no emojis.
 """
 
@@ -135,6 +144,26 @@ def sentence_case(text: str, sources: list[str]) -> str:
     return "".join(out)
 
 
+def mentioned_products(text: str, products: dict | None = None) -> list[str]:
+    """Product lines whose equipment the article names, e.g. a tender for "400 laptops and 25 displays".
+
+    When the source is this explicit, the email must pitch exactly that, not
+    whatever the model prefers.
+    """
+    products = products or load_config("products")
+    text = text.lower()
+    found = []
+    for line in products["product_lines"].values():
+        if any(re.search(rf"\b{re.escape(k)}\b", text) for k in line.get("keywords", [])):
+            found.append(line["label"])
+    return found
+
+
+def label_in_sentence(label: str) -> str:
+    """'Cameras, lenses & AV equipment' → 'cameras, lenses & AV equipment' (acronyms keep their capitals)."""
+    return " ".join(w if w.isupper() and len(w) > 1 else w.lower() for w in label.split())
+
+
 def _word(w: str) -> str:
     """Normalise a token: drop possessives and trailing punctuation ("Digits’s" → "digits")."""
     return re.sub(r"(['’]s?|[-&])$", "", w)
@@ -160,6 +189,8 @@ def check_copy(copy: DraftCopy, sources: list[str], allowed_products: list[str])
     for text, label in ((copy.opener, "opener"), (copy.subject, "subject")):
         for m in BANNED.finditer(text):
             issues.append(f"{label} uses sales/offer language: {m.group(0)!r}")
+        for m in FILLER.finditer(text):
+            issues.append(f"{label} uses filler or speculation: {m.group(0)!r}")
         for num in re.findall(r"\d[\d,.]*\d|\d", text):
             if num not in source_numbers:
                 issues.append(f"{label} states {num!r}, which isn't in the article")
@@ -180,11 +211,11 @@ def render(copy: DraftCopy, company: Company, contact: Contact, signal: Signal, 
     if contact.kind == "verified" and contact.name:
         greeting = f"Hi {contact.name.split()[0]},"
     elif contact.kind == "generic":
-        greeting = f"Hello {company.name} team,"
+        greeting = f"Hello {display_name(company.name)} team,"
     else:
         greeting = "Hello,"
 
-    focus = " and ".join(p.lower() for p in copy.product_focus)
+    focus = " and ".join(label_in_sentence(p) for p in copy.product_focus)
     source = _publisher(signal)
     body = (
         f"{greeting}\n\n"
@@ -196,7 +227,7 @@ def render(copy: DraftCopy, company: Company, contact: Contact, signal: Signal, 
         f"Email: {sender['email']}\n\n"
         f"Best regards,\n{sender['signature']}\n\n"
         f"---\n"
-        f"You're receiving this because {company.name} was in the news ({source}). "
+        f"You're receiving this because {display_name(company.name)} was in the news ({source}). "
         f"Reply \"unsubscribe\" and we won't contact you again."
     )
     return copy.subject.strip(), body
@@ -210,18 +241,23 @@ def generate_draft(session: Session, company: Company, llm: LLM = ollama_json,
         return None
 
     sender = sender_details()
-    labels = list(company.score.product_lines) if company.score and company.score.product_lines else [
-        "Laptops & desktops", "Monitors, docks & peripherals"]
     title = _clean_title(signal.title)
-    prompt = PROMPT.format(sender=sender["name"], company=company.name, title=title,
+    # If the article names the equipment (a tender, say), pitch exactly that.
+    named = mentioned_products(f"{title} {signal.evidence or ''}")
+    labels = named or (list(company.score.product_lines) if company.score and company.score.product_lines
+                       else ["Laptops & desktops", "Monitors, docks & peripherals"])
+    prompt = PROMPT.format(sender=sender["name"], company=display_name(company.name), title=title,
                            evidence=signal.evidence or title, labels="; ".join(labels))
 
     copy = llm(prompt, DraftCopy, client)
     if copy is None:
         return None
-    # Keep only product labels we actually offer for this signal; fall back to the top ones.
-    by_lower = {l.lower(): l for l in labels}
-    copy.product_focus = [by_lower[p.lower()] for p in copy.product_focus if p.lower() in by_lower][:2] or labels[:2]
+    if named:
+        copy.product_focus = named[:2]
+    else:
+        # Keep only product labels we offer for this signal; fall back to the top ones.
+        by_lower = {l.lower(): l for l in labels}
+        copy.product_focus = [by_lower[p.lower()] for p in copy.product_focus if p.lower() in by_lower][:2] or labels[:2]
 
     sources = [signal.title, signal.evidence or "", company.name]
     copy.subject = sentence_case(copy.subject, sources)
