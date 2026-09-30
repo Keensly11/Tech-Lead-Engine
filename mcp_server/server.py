@@ -8,9 +8,9 @@ Run:  python -m mcp_server.server   (stdio transport)
 
 from mcp.server.mcpserver import MCPServer
 
-from lead_engine import pipeline, queries
+from lead_engine import drafting, pipeline, queries
 from lead_engine.db import SessionLocal, init_db
-from lead_engine.models import Company, Contact
+from lead_engine.models import Company, Contact, Draft
 from lead_engine.schemas import Outcome, RawContact
 
 mcp = MCPServer("lead-engine")
@@ -107,6 +107,67 @@ def add_contact(company_id: int, email: str, name: str | None = None, role: str 
         score = pipeline.rescore(s, company)
         s.commit()
         return {"added": contact.email, "route": score.route, "contact": score.contact, "priority": score.priority}
+
+
+@mcp.tool()
+def draft_emails(company_id: int | None = None, limit: int = 5, regenerate: bool = False) -> list[dict]:
+    """Draft outreach emails for high-priority leads that have a contact. Nothing is sent.
+
+    Drafts are grounded in the lead's news signal and fact-checked; flagged ones get
+    status needs_review. regenerate=True replaces unapproved drafts.
+    """
+    with SessionLocal() as s:
+        ids = [company_id] if company_id is not None else None
+        return drafting.draft_leads(s, limit, ids, regenerate) or [
+            {"note": "nothing to draft: no high lead with a contact and without an active draft"}]
+
+
+@mcp.tool()
+def list_drafts(status: str | None = None) -> list[dict]:
+    """Drafts awaiting review (draft + needs_review), or those with a given status: draft | needs_review | approved | rejected."""
+    with SessionLocal() as s:
+        return drafting.list_drafts(s, status)
+
+
+@mcp.tool()
+def get_draft(draft_id: int) -> dict:
+    """The full email: recipient, subject, body, source signal and any fact-check issues."""
+    with SessionLocal() as s:
+        d = s.get(Draft, draft_id)
+        return drafting.draft_detail(d) if d else {"error": f"no draft with id {draft_id}"}
+
+
+@mcp.tool()
+def edit_draft(draft_id: int, subject: str | None = None, body: str | None = None) -> dict:
+    """Change a pending draft's subject and/or body before approving it."""
+    with SessionLocal() as s:
+        try:
+            return drafting.draft_detail(drafting.edit_draft(s, draft_id, subject, body))
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+
+@mcp.tool()
+def approve_draft(draft_id: int, note: str | None = None) -> dict:
+    """Approve a draft for sending. Only do this when the user explicitly approves this specific draft.
+
+    Approval doesn't send anything yet; the sender (with daily caps and a suppression list) is a later step.
+    """
+    with SessionLocal() as s:
+        try:
+            return drafting.draft_summary(drafting.approve_draft(s, draft_id, note))
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+
+@mcp.tool()
+def reject_draft(draft_id: int, reason: str) -> dict:
+    """Reject a draft, with the reason (it's kept as feedback for improving drafts)."""
+    with SessionLocal() as s:
+        try:
+            return drafting.draft_summary(drafting.reject_draft(s, draft_id, reason))
+        except ValueError as exc:
+            return {"error": str(exc)}
 
 
 @mcp.tool()

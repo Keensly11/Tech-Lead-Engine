@@ -49,6 +49,27 @@ Promising leads with no usable contact stay in **review**. `lead-engine find-con
 A lead that gains a usable contact is rescored and can move from review to high. Each
 company is searched at most once every 30 days.
 
+## Email drafts
+`lead-engine draft` writes an outreach email for each **high** lead that has a contact.
+**Nothing is sent**: drafts wait for a person to approve them.
+
+- The LLM writes only the **subject**, a **1–2 sentence opener** about the lead's strongest
+  news signal, and which **product lines** to lead with. Everything else (who we are,
+  website, phone, opt-out line) is a fixed template filled from `config/products.yaml`.
+- **Fact check:** numbers and names in the opener or subject must appear in the source
+  article, and offer or price language ("free", "discount", "%", "AED 500") is flagged.
+  Flagged drafts get status `needs_review` with the reasons listed.
+- **Approval rules:** a draft can't be approved while the sender details are placeholders or
+  if the unsubscribe line was removed. Approved drafts are never regenerated.
+
+```bash
+lead-engine draft                 # draft for high leads without an active draft
+lead-engine drafts                # list drafts awaiting review
+lead-engine draft-show 9          # full email + source + issues
+lead-engine approve 9 --note "ok"
+lead-engine reject 9 --reason "wrong contact"
+```
+
 ## Reliability
 - **Validated LLM output.** News extraction must match a Pydantic schema, meet a
   confidence threshold, and quote evidence that actually appears in the article.
@@ -105,13 +126,15 @@ Claude Desktop doesn't set a working directory, so use absolute paths. Relative 
 paths in `.env` resolve against the project root, so the CLI and MCP server share one database.
 Fully quit Claude Desktop (from the system tray) and reopen it to load the server.
 Tools: `search_leads`, `get_lead`, `explain_score`, `rescore`, `find_contacts`, `set_domain`,
-`add_contact`, `log_outcome`, `pipeline_status`.
+`add_contact`, `draft_emails`, `list_drafts`, `get_draft`, `edit_draft`, `approve_draft`,
+`reject_draft`, `log_outcome`, `pipeline_status`.
 Example prompts: "top film leads and why", "find contacts for the review leads",
 "EQT's website is eqtgroup.com", "log that Northwind replied, meeting booked".
 
 ## Roadmap
 1. ~~MVP: sample + RSS collectors, dedup, scoring, routing, local/Odoo sinks, MCP (read + outcomes)~~
 1. ~~Contact finder: domain discovery, polite crawl, email extraction, manual set_domain / add_contact~~
+1. ~~Email drafting grounded in evidence + fact-check + human approval (CLI and MCP)~~
 2. Eval set: hand-label 100 real leads (`eval/`) and measure precision@20 of the scorer
 3. Email drafting grounded in evidence + fact-check + approval via Odoo stage
 4. Sender: dedicated subdomain, SPF/DKIM/DMARC, daily caps, suppression list, 2 follow-ups max

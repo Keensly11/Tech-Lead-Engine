@@ -1,11 +1,15 @@
 # What we sell, and which signals make each product line relevant.
 # Used to tell sales which product line to lead with (and later by the email drafter).
 
+# Sender details used in every email draft. Put your real details in
+# config/sender.yaml (git-ignored; copy sender.example.yaml). They override these
+# placeholders. Drafts can't be approved while placeholders are in use.
 company:
   name: "YOUR COMPANY NAME"
   website: "https://example.com"
   phone: "+971 00 000 0000"
   email: "sales@example.com"
+  signature: "The YOUR COMPANY NAME Sales Team"
 
 product_lines:
   laptops_desktops:

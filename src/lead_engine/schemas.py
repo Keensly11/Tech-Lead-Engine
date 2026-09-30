@@ -83,9 +83,10 @@ class NewsExtraction(BaseModel):
     is_relevant: bool = Field(default=False, description="True only if a specific company is doing something that implies buying IT/AV equipment")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
-    @classmethod
-    def llm_schema(cls) -> dict:
-        """JSON schema for constrained decoding, with every field required so none can be skipped."""
-        schema = cls.model_json_schema()
-        schema["required"] = list(schema["properties"])
-        return schema
+
+class DraftCopy(BaseModel):
+    """The only part of an email the LLM writes. Everything else is a fixed template."""
+
+    product_focus: list[str] = Field(default_factory=list, description="1-2 product lines from the allowed list")
+    opener: str = Field(default="", description="1-2 sentences referring to the news; no prices, offers or promises")
+    subject: str = Field(default="", description="Short, specific subject line, under 70 characters")

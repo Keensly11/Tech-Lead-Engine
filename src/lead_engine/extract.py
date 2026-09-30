@@ -5,14 +5,12 @@ validated with Pydantic and checked against the source text: the evidence quote
 must actually appear in the article. Anything that fails is dropped, not guessed.
 """
 
-import json
 import logging
 
 import httpx
-from pydantic import ValidationError
 
+from lead_engine.llm import ollama_json
 from lead_engine.schemas import NewsExtraction
-from lead_engine.settings import env
 
 log = logging.getLogger(__name__)
 
@@ -55,26 +53,8 @@ def _name_is_grounded(name: str, source_text: str) -> bool:
 
 
 def extract_from_news(title: str, text: str, client: httpx.Client | None = None) -> NewsExtraction | None:
-    client = client or httpx.Client(timeout=300)
-    try:
-        resp = client.post(
-            f"{env('OLLAMA_URL', 'http://localhost:11434')}/api/chat",
-            json={
-                "model": env("OLLAMA_MODEL", "llama3.1:8b"),
-                "messages": [{"role": "user", "content": PROMPT.format(title=title, text=text)}],
-                "format": NewsExtraction.llm_schema(),
-                "stream": False,
-                "options": {"temperature": 0},
-            },
-        )
-        resp.raise_for_status()
-        content = resp.json()["message"]["content"]
-        result = NewsExtraction.model_validate(json.loads(content))
-    except (httpx.HTTPError, KeyError, json.JSONDecodeError, ValidationError) as exc:
-        log.warning("extraction failed for %r: %s", title, exc)
-        return None
-
-    if not result.is_relevant:
+    result = ollama_json(PROMPT.format(title=title, text=text), NewsExtraction, client)
+    if result is None or not result.is_relevant:
         return None
     if not _name_is_grounded(result.company_name, f"{title}\n{text}"):
         log.info("company %r not named in source, skipped: %s", result.company_name, title)

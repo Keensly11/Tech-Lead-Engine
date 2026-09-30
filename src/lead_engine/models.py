@@ -4,6 +4,7 @@ company  1─* signal     (evidence that they may be buying)
 company  1─* contact    (who we could email, with how we found them)
 company  1─1 score      (latest fit/intent/contact scores + explanation)
 company  1─* export     (what we pushed to which sink; makes exports idempotent)
+company  1─* draft      (outreach emails waiting for human approval)
 company  1─* outcome    (what happened: replied, meeting, bounced… → feedback loop)
 """
 
@@ -102,6 +103,30 @@ class Export(Base):
     # Hash of the payload last pushed. Re-push only when it changes.
     payload_hash: Mapped[str] = mapped_column(String(64))
     exported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Draft(Base):
+    """An outreach email awaiting human review. Nothing is ever sent from here.
+
+    status: draft (passed checks) | needs_review (fact check flagged something)
+            | approved | rejected
+    """
+
+    __tablename__ = "draft"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("company.id"), index=True)
+    to_email: Mapped[str] = mapped_column(String(255))
+    subject: Mapped[str] = mapped_column(String(255))
+    body: Mapped[str] = mapped_column(Text)
+    signal_url: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    issues: Mapped[list] = mapped_column(JSON, default=list)
+    reviewer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    company: Mapped[Company] = relationship()
 
 
 class Outcome(Base):
