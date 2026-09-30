@@ -13,6 +13,7 @@
   lead-engine send-status
   lead-engine check-inbox [--days 14]
   lead-engine suppress someone@company.com
+  lead-engine ui [--port 8765]
   lead-engine top [--route high] [--segment film_media]
   lead-engine show 3
   lead-engine rescore
@@ -88,6 +89,9 @@ def main(argv: list[str] | None = None) -> None:
     su = sub.add_parser("suppress", help="never email this address (or @domain.com) again")
     su.add_argument("email")
     su.add_argument("--reason", default="manual")
+
+    ui = sub.add_parser("ui", help="open the local review page (http://127.0.0.1:8765)")
+    ui.add_argument("--port", type=int, default=8765)
 
     t = sub.add_parser("top", help="list best leads")
     t.add_argument("--route", choices=["high", "review", "archive"])
@@ -166,6 +170,10 @@ def main(argv: list[str] | None = None) -> None:
             added = sender.suppress(session, args.email, args.reason)
             session.commit()
             print(f"{args.email} {'suppressed' if added else 'was already suppressed'}")
+        elif args.cmd == "ui":
+            from lead_engine.ui.app import serve
+            session.close()
+            serve(args.port)
         elif args.cmd == "top":
             rows = queries.search_leads(session, args.segment, args.route, limit=args.limit)
             print(f"{'id':>4}  {'route':7} {'prio':>5} {'fit':>5} {'int':>5} {'con':>5}  company")

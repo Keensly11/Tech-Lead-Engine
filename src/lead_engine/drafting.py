@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from lead_engine.llm import ollama_json
 from lead_engine.models import Company, Contact, Draft, Score, Signal
 from lead_engine.resolve import display_name
-from lead_engine.schemas import DraftCopy
+from lead_engine.schemas import DraftCopy, RawContact
 from lead_engine.scoring import recency_decay
 from lead_engine.settings import CONFIG_DIR, load_config
 
@@ -363,13 +363,30 @@ def list_drafts(session: Session, status: str | None = None) -> list[dict]:
     return [draft_summary(d) for d in session.scalars(q)]
 
 
-def edit_draft(session: Session, draft_id: int, subject: str | None = None, body: str | None = None) -> Draft:
+def edit_draft(session: Session, draft_id: int, subject: str | None = None, body: str | None = None,
+               to_email: str | None = None) -> Draft:
     d = _pending(session, draft_id)
-    if subject is not None:
-        d.subject = subject
-    if body is not None:
-        d.body = body
-    d.reviewer_note = "edited by reviewer"
+    changed = False
+    if subject is not None and subject.strip() != d.subject:
+        d.subject, changed = subject.strip(), True
+    if body is not None and body.replace("\r\n", "\n").strip() != d.body:
+        d.body, changed = body.replace("\r\n", "\n").strip(), True
+    if to_email is not None and to_email.strip().lower() != d.to_email:
+        d.to_email, changed = RawContact(email=to_email, kind="verified").email, True  # validates the address
+    if changed:
+        d.reviewer_note = "edited by reviewer"
+    session.commit()
+    return d
+
+
+def unapprove_draft(session: Session, draft_id: int) -> Draft:
+    """Move an approved draft back to review, e.g. to edit it before sending."""
+    d = session.get(Draft, draft_id)
+    if d is None:
+        raise ValueError(f"no draft with id {draft_id}")
+    if d.status != "approved":
+        raise ValueError(f"draft {draft_id} is {d.status}, not approved")
+    d.status, d.reviewed_at = "draft", None
     session.commit()
     return d
 

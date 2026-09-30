@@ -128,71 +128,98 @@ def build_message(draft: Draft, to_email: str, subject: str, sender: dict) -> Em
     return msg
 
 
-def send_approved(session: Session, mode: str | None = None, limit: int | None = None,
-                  transport: Transport | None = None) -> list[dict]:
-    mode = mode or env("SEND_MODE", "dry_run")
+def _check_mode(mode: str) -> str:
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}")
-    test_inbox = env("TEST_INBOX")
-    if mode == "test" and not test_inbox:
+    if mode == "test" and not env("TEST_INBOX"):
         raise RuntimeError("Set TEST_INBOX in .env for test mode")
-    if transport is None:
-        transport = OutboxTransport() if mode == "dry_run" else SmtpTransport()
+    return mode
 
+
+def _default_transport(mode: str) -> Transport:
+    return OutboxTransport() if mode == "dry_run" else SmtpTransport()
+
+
+def deliver(session: Session, draft: Draft, mode: str, transport: Transport, sender: dict) -> dict:
+    """Run every guardrail for one draft, then send it. Returns a report entry.
+
+    result: sent | written (dry run) | skipped | stopped (daily cap) | failed
+    """
+    base = {"draft_id": draft.id, "company": draft.company.name, "to": draft.to_email, "mode": mode}
+
+    blocked = is_suppressed(session, draft.to_email)
+    if blocked:
+        return base | {"result": "skipped", "reason": f"suppressed ({blocked.reason}: {blocked.email})"}
+    if mode == "live":
+        if recently_emailed(session, draft.company_id):
+            return base | {"result": "skipped", "reason": f"company emailed in the last {COMPANY_COOLDOWN_DAYS} days"}
+        if live_sent_last_24h(session) >= daily_cap():
+            return base | {"result": "stopped", "reason": f"daily cap of {daily_cap()} reached"}
+
+    to_email, subject = draft.to_email, draft.subject
+    if mode == "test":
+        to_email, subject = env("TEST_INBOX"), f"[TEST → {draft.to_email}] {draft.subject}"
+    msg = build_message(draft, to_email, subject, sender)
+
+    record = Send(draft_id=draft.id, company_id=draft.company_id, to_email=to_email, mode=mode,
+                  message_id=msg["Message-ID"], status="pending")
+    session.add(record)
+    session.commit()  # the pending row exists before anything leaves the machine
+
+    try:
+        transport.send(msg)
+    except Exception as exc:
+        record.status, record.error = "failed", str(exc)[:500]
+        session.commit()
+        log.warning("send failed for draft %s: %s", draft.id, exc)
+        return base | {"result": "failed", "reason": str(exc)[:200]}
+
+    record.status = "sent"
+    if mode == "live":
+        draft.status = "sent"
+        session.add(Outcome(company_id=draft.company_id, outcome="emailed", note=f"draft {draft.id}"))
+    session.commit()
+    if mode == "dry_run":
+        return base | {"result": "written", "file": f"out/outbox/draft-{draft.id}.eml"}
+    return base | {"result": "sent", "delivered_to": to_email}
+
+
+def send_approved(session: Session, mode: str | None = None, limit: int | None = None,
+                  transport: Transport | None = None) -> list[dict]:
+    """Batch: send every approved draft, each at most once per mode."""
+    mode = _check_mode(mode or env("SEND_MODE", "dry_run"))
+    transport = transport or _default_transport(mode)
     sender = sender_details()
     drafts = session.scalars(select(Draft).where(Draft.status == "approved").order_by(Draft.reviewed_at)).all()
     report = []
     for draft in drafts:
         if limit is not None and len([r for r in report if r["result"] in ("sent", "written")]) >= limit:
             break
-        base = {"draft_id": draft.id, "company": draft.company.name, "to": draft.to_email, "mode": mode}
-
         if session.scalar(select(Send.id).where(Send.draft_id == draft.id, Send.mode == mode,
                                                 Send.status.in_(("pending", "sent")))):
-            continue  # already done in this mode; each draft goes out at most once per mode
-
-        blocked = is_suppressed(session, draft.to_email)
-        if blocked:
-            report.append(base | {"result": "skipped", "reason": f"suppressed ({blocked.reason}: {blocked.email})"})
-            continue
-        if mode == "live":
-            if recently_emailed(session, draft.company_id):
-                report.append(base | {"result": "skipped",
-                                      "reason": f"company emailed in the last {COMPANY_COOLDOWN_DAYS} days"})
-                continue
-            if live_sent_last_24h(session) >= daily_cap():
-                report.append(base | {"result": "stopped", "reason": f"daily cap of {daily_cap()} reached"})
-                break
-
-        to_email, subject = draft.to_email, draft.subject
-        if mode == "test":
-            to_email, subject = test_inbox, f"[TEST → {draft.to_email}] {draft.subject}"
-        msg = build_message(draft, to_email, subject, sender)
-
-        record = Send(draft_id=draft.id, company_id=draft.company_id, to_email=to_email, mode=mode,
-                      message_id=msg["Message-ID"], status="pending")
-        session.add(record)
-        session.commit()  # the pending row exists before anything leaves the machine
-
-        try:
-            transport.send(msg)
-        except Exception as exc:
-            record.status, record.error = "failed", str(exc)[:500]
-            session.commit()
-            log.warning("send failed for draft %s: %s", draft.id, exc)
-            report.append(base | {"result": "failed", "reason": str(exc)[:200]})
-            continue
-
-        record.status = "sent"
-        if mode == "live":
-            draft.status = "sent"
-            session.add(Outcome(company_id=draft.company_id, outcome="emailed", note=f"draft {draft.id}"))
-        session.commit()
-        if mode == "dry_run":
-            report.append(base | {"result": "written", "file": f"out/outbox/draft-{draft.id}.eml"})
-        else:
-            report.append(base | {"result": "sent", "delivered_to": to_email})
+            continue  # already done in this mode
+        entry = deliver(session, draft, mode, transport, sender)
+        report.append(entry)
+        if entry["result"] == "stopped":
+            break
     return report
+
+
+def send_one(session: Session, draft_id: int, mode: str, transport: Transport | None = None) -> dict:
+    """Send one specific draft (used by the review UI).
+
+    Test sends work for any pending or approved draft and may be repeated after edits.
+    Live sends need an approved draft and pass through every guardrail.
+    """
+    mode = _check_mode(mode)
+    draft = session.get(Draft, draft_id)
+    if draft is None:
+        raise ValueError(f"no draft with id {draft_id}")
+    if mode == "live" and draft.status != "approved":
+        raise ValueError(f"draft {draft_id} is {draft.status}; only approved drafts can be sent for real")
+    if draft.status not in ("draft", "needs_review", "approved"):
+        raise ValueError(f"draft {draft_id} is already {draft.status}")
+    return deliver(session, draft, mode, transport or _default_transport(mode), sender_details())
 
 
 def send_status(session: Session) -> dict:

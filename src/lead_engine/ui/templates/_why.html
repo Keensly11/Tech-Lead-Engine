@@ -1,0 +1,5 @@
+<div class="why">
+  {% if d.signal_title %}Why this lead: <a href="{{ d.signal_url }}" target="_blank" rel="noopener">{{ d.signal_title }}</a>{% endif %}
+  {% if d.contact_source and d.contact_source.startswith("http") %} · email found on <a href="{{ d.contact_source }}" target="_blank" rel="noopener">their website</a>{% endif %}
+  {% if d.failed %}<br>Last attempt failed: {{ d.failed }}{% endif %}
+</div>

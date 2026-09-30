@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Outreach Review</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
+    --accent: #1f5f4a; --accent-ink: #ffffff; --soft: #eef4f1;
+    --warn-bg: #fff6e0; --warn-ink: #7a5500; --err-bg: #fdecec; --err-ink: #8a1f1f; --ok-bg: #e9f5ee; --ok-ink: #1d5a3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #a09f98; --line: #34332f;
+      --accent: #5fb592; --accent-ink: #0e1a15; --soft: #1d2a24;
+      --warn-bg: #3a2f14; --warn-ink: #f0cf7a; --err-bg: #3a1c1c; --err-ink: #f2a6a6; --ok-bg: #173026; --ok-ink: #9fdcbd;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 32px 0 12px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; font-size: 13px; }
+  .stat b { font-variant-numeric: tabular-nums; }
+  .flash { border-radius: 8px; padding: 10px 14px; margin: 12px 0 0; }
+  .flash.ok { background: var(--ok-bg); color: var(--ok-ink); }
+  .flash.error { background: var(--err-bg); color: var(--err-ink); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; margin: 0 0 16px; overflow: hidden; }
+  .card-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 14px 18px;
+               border-bottom: 1px solid var(--line); }
+  .company { font-weight: 600; font-size: 16px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .badge { display: inline-block; font-size: 12px; border-radius: 99px; padding: 2px 10px; background: var(--soft); color: var(--accent); }
+  .email { padding: 14px 18px; }
+  .row { display: grid; grid-template-columns: 70px 1fr; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .row label { color: var(--muted); font-size: 13px; }
+  .to { font-weight: 600; word-break: break-all; }
+  input[type=text], input[type=email], textarea {
+    width: 100%; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; }
+  textarea { min-height: 300px; resize: vertical; line-height: 1.55; }
+  .body { white-space: pre-wrap; background: var(--bg); border-radius: 8px; padding: 14px; margin-top: 4px; }
+  .why { padding: 0 18px 14px; font-size: 13px; color: var(--muted); }
+  .why a { color: var(--accent); }
+  .issues { margin: 0 18px 12px; background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+  .issues ul { margin: 4px 0 0; padding-left: 18px; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line); background: var(--bg); }
+  button { font: inherit; border-radius: 8px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--line);
+           background: var(--panel); color: var(--ink); }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.link { border: none; background: none; color: var(--muted); text-decoration: underline; padding: 8px 4px; }
+  .spacer { flex: 1; }
+  details.reject summary { cursor: pointer; color: var(--muted); font-size: 14px; list-style: none; }
+  details.reject[open] { flex-basis: 100%; }
+  details.reject .rj { display: flex; gap: 8px; margin-top: 8px; }
+  .empty { color: var(--muted); background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; padding: 18px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 13px; }
+  .table-scroll { overflow-x: auto; }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr; gap: 2px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Outreach review</h1>
+    <form method="post" action="{{ url_for('check_inbox') }}">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <button type="submit">Check inbox for replies</button>
+    </form>
+  </header>
+
+  <div class="stats">
+    <span class="stat">Sent today <b>{{ status.live_sent_last_24h }} / {{ status.daily_cap }}</b></span>
+    <span class="stat">Ready to send <b>{{ ready|length }}</b></span>
+    <span class="stat">Needs review <b>{{ review|length }}</b></span>
+    <span class="stat">Blocked addresses <b>{{ status.suppressed }}</b></span>
+  </div>
+
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+    <div class="flash {{ category }}">{{ message }}</div>
+  {% endfor %}
+
+  <h2>Ready to send</h2>
+  {% for d in ready %}
+  <form class="card" id="draft-{{ d.id }}" method="post" action="{{ url_for('act', draft_id=d.id) }}">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <input type="hidden" name="confirm" value="yes">
+    <div class="card-head">
+      <div><div class="company">{{ d.company }}</div>
+        <div class="meta">{{ d.domain or "" }}{% if d.tests_sent %} · test copy sent {{ d.tests_sent }}×{% endif %}</div></div>
+      <span class="badge">Approved</span>
+    </div>
+    <div class="email">
+      <div class="row"><label>To</label><div class="to">{{ d.to_email }} <span class="meta">({{ d.contact_kind }})</span></div></div>
+      <div class="row"><label>Subject</label><div>{{ d.subject }}</div></div>
+      <div class="body">{{ d.body }}</div>
+    </div>
+    {% include "_why.html" %}
+    <div class="actions">
+      <button type="submit" name="action" value="send" class="primary"
+        onclick='return confirm({{ ("Send this email to " ~ d.to_email ~ " for real?\n\nIt goes out from your sales address and can’t be undone.")|tojson }})'>
+        Send to {{ d.to_email }}</button>
+      <button type="submit" name="action" value="test">Send test to my inbox</button>
+      <span class="spacer"></span>
+      <button type="submit" name="action" value="unapprove" class="link">Edit</button>
+    </div>
+  </form>
+  {% else %}
+  <div class="empty">Nothing approved yet. Approve a draft below, or use “Approve &amp; send”.</div>
+  {% endfor %}
+
+  <h2>Needs review</h2>
+  {% for d in review %}
+  <form class="card" id="draft-{{ d.id }}" method="post" action="{{ url_for('act', draft_id=d.id) }}">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <input type="hidden" name="confirm" value="yes">
+    <div class="card-head">
+      <div><div class="company">{{ d.company }}</div>
+        <div class="meta">{{ d.domain or "" }}{% if d.note %} · {{ d.note }}{% endif %}{% if d.tests_sent %} · test copy sent {{ d.tests_sent }}×{% endif %}</div></div>
+      <span class="badge">{{ "Check the flags" if d.issues else "Draft" }}</span>
+    </div>
+    {% if d.issues %}
+    <div class="issues">The automatic check flagged:<ul>{% for i in d.issues %}<li>{{ i }}</li>{% endfor %}</ul></div>
+    {% endif %}
+    <div class="email">
+      <div class="row"><label for="to-{{ d.id }}">To</label>
+        <input type="email" id="to-{{ d.id }}" name="to_email" value="{{ d.to_email }}" required></div>
+      <div class="row"><label for="subj-{{ d.id }}">Subject</label>
+        <input type="text" id="subj-{{ d.id }}" name="subject" value="{{ d.subject }}" required></div>
+      <textarea name="body" aria-label="Email text">{{ d.body }}</textarea>
+    </div>
+    {% include "_why.html" %}
+    <div class="actions">
+      <button type="submit" name="action" value="send" class="primary"
+        onclick="return confirm('Approve and send this email to ' + this.form.to_email.value + ' for real?\n\nIt goes out from your sales address and can\'t be undone.')">
+        Approve &amp; send</button>
+      <button type="submit" name="action" value="test">Send test to my inbox</button>
+      <button type="submit" name="action" value="save">Save changes</button>
+      <span class="spacer"></span>
+      <details class="reject">
+        <summary>Reject…</summary>
+        <div class="rj">
+          <input type="text" name="reason" placeholder="Why? (e.g. wrong contact, not a fit)">
+          <button type="submit" name="action" value="reject" formnovalidate>Reject</button>
+        </div>
+      </details>
+    </div>
+  </form>
+  {% else %}
+  <div class="empty">No drafts waiting. New ones appear after <code>lead-engine draft</code>.</div>
+  {% endfor %}
+
+  <h2>Sent</h2>
+  {% if sent %}
+  <div class="table-scroll">
+  <table>
+    <tr><th>Company</th><th>To</th><th>Subject</th><th>Sent</th></tr>
+    {% for d in sent %}
+    <tr><td>{{ d.company }}</td><td>{{ d.to_email }}</td><td>{{ d.subject }}</td>
+        <td>{{ d.sent_at.strftime("%d %b %H:%M") if d.sent_at else "" }}</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% else %}
+  <div class="empty">Nothing sent for real yet.</div>
+  {% endif %}
+
+  <p class="meta" style="margin-top:28px">Test copies go to {{ test_inbox or "TEST_INBOX (not set)" }}.
+    Sending follows the same rules as the command line: daily limit, blocked addresses and one email per company every 90 days.</p>
+</div>
+</body>
+</html>

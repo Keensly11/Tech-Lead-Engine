@@ -84,6 +84,17 @@ Live guardrails: a suppression list (unsubscribed and bounced addresses, or whol
 `pending` record saved before each SMTP call so a crash can't cause a double send. Emails include
 `Reply-To` and a `List-Unsubscribe` header.
 
+### Review page
+```bash
+lead-engine ui        # http://127.0.0.1:8765
+```
+A local page that shows each draft as it will be sent: recipient, subject, the full text, and
+*why* this lead (source article, where the email was found). Drafts waiting for review can be
+edited in place, then **Approve & send**, **Send test to my inbox** or **Reject**. Approved
+drafts have a **Send to …** button that asks for confirmation first. The same guardrails apply
+as on the command line. The page only listens on 127.0.0.1, and every button carries a
+per-session token, so other websites can't trigger a send.
+
 `lead-engine check-inbox` reads the inbox over IMAP **read-only** and records outcomes:
 - replies (matched by `In-Reply-To` / `References`), which ignore out-of-office auto-replies
 - "unsubscribe" replies, which are added to the suppression list
@@ -159,6 +170,7 @@ Example prompts: "top film leads and why", "find contacts for the review leads",
 1. ~~Contact finder: domain discovery, polite crawl, email extraction, manual set_domain / add_contact~~
 1. ~~Email drafting grounded in evidence + fact-check + human approval (CLI and MCP)~~
 1. ~~Sender: dry-run/test/live modes, daily cap, suppression list, reply/unsubscribe/bounce detection~~
+1. ~~Review page: see, edit, test and send drafts with a click~~
 2. Eval set: hand-label 100 real leads (`eval/`) and measure precision@20 of the scorer
 3. Email drafting grounded in evidence + fact-check + approval via Odoo stage
 4. Sender: dedicated subdomain, SPF/DKIM/DMARC, daily caps, suppression list, 2 follow-ups max
