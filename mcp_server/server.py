@@ -8,7 +8,7 @@ Run:  python -m mcp_server.server   (stdio transport)
 
 from mcp.server.mcpserver import MCPServer
 
-from lead_engine import drafting, pipeline, queries
+from lead_engine import drafting, inbox, pipeline, queries, sender
 from lead_engine.db import SessionLocal, init_db
 from lead_engine.models import Company, Contact, Draft
 from lead_engine.schemas import Outcome, RawContact
@@ -168,6 +168,33 @@ def reject_draft(draft_id: int, reason: str) -> dict:
             return drafting.draft_summary(drafting.reject_draft(s, draft_id, reason))
         except ValueError as exc:
             return {"error": str(exc)}
+
+
+@mcp.tool()
+def send_status() -> dict:
+    """Sending overview: current mode, approved drafts waiting, live emails in the last 24h vs the daily cap,
+    failures and suppression-list size. Sending itself is CLI-only (lead-engine send)."""
+    with SessionLocal() as s:
+        return sender.send_status(s)
+
+
+@mcp.tool()
+def check_inbox(days: int = 14) -> list[dict]:
+    """Read the sales inbox (read-only) and record replies, unsubscribes and bounces as lead outcomes."""
+    with SessionLocal() as s:
+        try:
+            return inbox.check_inbox(s, days) or [{"note": "no new replies, unsubscribes or bounces"}]
+        except (RuntimeError, OSError) as exc:
+            return [{"error": f"inbox check failed: {exc}"}]
+
+
+@mcp.tool()
+def suppress_email(email: str, reason: str = "manual") -> str:
+    """Never email this address again. Use '@domain.com' to block a whole company."""
+    with SessionLocal() as s:
+        added = sender.suppress(s, email, reason)
+        s.commit()
+        return f"{email} {'suppressed' if added else 'was already suppressed'}"
 
 
 @mcp.tool()

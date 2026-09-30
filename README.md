@@ -70,6 +70,28 @@ lead-engine approve 9 --note "ok"
 lead-engine reject 9 --reason "wrong contact"
 ```
 
+## Sending
+`lead-engine send` sends **approved** drafts. It has three modes (`SEND_MODE` in `.env`, or `--mode`):
+
+| Mode | What happens |
+|---|---|
+| `dry_run` (default) | writes `out/outbox/draft-<id>.eml`, which you can open in any mail client. Nothing is sent. |
+| `test` | sends everything to `TEST_INBOX`, with the real recipient shown in the subject |
+| `live` | sends to the real recipient. Also requires `--confirm-live`. |
+
+Live guardrails: a suppression list (unsubscribed and bounced addresses, or whole `@domain`s),
+**one email per company per 90 days**, a **daily cap** (`DAILY_SEND_CAP`, default 20), and a
+`pending` record saved before each SMTP call so a crash can't cause a double send. Emails include
+`Reply-To` and a `List-Unsubscribe` header.
+
+`lead-engine check-inbox` reads the inbox over IMAP **read-only** and records outcomes:
+- replies (matched by `In-Reply-To` / `References`), which ignore out-of-office auto-replies
+- "unsubscribe" replies, which are added to the suppression list
+- bounces, where the failed address is added to the suppression list
+
+Hostinger settings: `smtp.hostinger.com:465`, `imap.hostinger.com:993`. Keep volume low while
+the domain builds a reputation, and make sure SPF, DKIM and DMARC are set up in hPanel.
+
 ## Reliability
 - **Validated LLM output.** News extraction must match a Pydantic schema, meet a
   confidence threshold, and quote evidence that actually appears in the article.
@@ -127,7 +149,8 @@ paths in `.env` resolve against the project root, so the CLI and MCP server shar
 Fully quit Claude Desktop (from the system tray) and reopen it to load the server.
 Tools: `search_leads`, `get_lead`, `explain_score`, `rescore`, `find_contacts`, `set_domain`,
 `add_contact`, `draft_emails`, `list_drafts`, `get_draft`, `edit_draft`, `approve_draft`,
-`reject_draft`, `log_outcome`, `pipeline_status`.
+`reject_draft`, `send_status`, `check_inbox`, `suppress_email`, `log_outcome`, `pipeline_status`.
+There is deliberately no MCP tool that sends email: sending stays a CLI action by a person.
 Example prompts: "top film leads and why", "find contacts for the review leads",
 "EQT's website is eqtgroup.com", "log that Northwind replied, meeting booked".
 
@@ -135,6 +158,7 @@ Example prompts: "top film leads and why", "find contacts for the review leads",
 1. ~~MVP: sample + RSS collectors, dedup, scoring, routing, local/Odoo sinks, MCP (read + outcomes)~~
 1. ~~Contact finder: domain discovery, polite crawl, email extraction, manual set_domain / add_contact~~
 1. ~~Email drafting grounded in evidence + fact-check + human approval (CLI and MCP)~~
+1. ~~Sender: dry-run/test/live modes, daily cap, suppression list, reply/unsubscribe/bounce detection~~
 2. Eval set: hand-label 100 real leads (`eval/`) and measure precision@20 of the scorer
 3. Email drafting grounded in evidence + fact-check + approval via Odoo stage
 4. Sender: dedicated subdomain, SPF/DKIM/DMARC, daily caps, suppression list, 2 follow-ups max

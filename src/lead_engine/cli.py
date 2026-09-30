@@ -9,6 +9,10 @@
   lead-engine draft-show 1
   lead-engine approve 1 [--note "looks good"]
   lead-engine reject 1 --reason "wrong contact"
+  lead-engine send [--mode dry_run|test|live] [--confirm-live]
+  lead-engine send-status
+  lead-engine check-inbox [--days 14]
+  lead-engine suppress someone@company.com
   lead-engine top [--route high] [--segment film_media]
   lead-engine show 3
   lead-engine rescore
@@ -19,7 +23,7 @@ import argparse
 import json
 import logging
 
-from lead_engine import drafting, pipeline, queries
+from lead_engine import drafting, inbox, pipeline, queries, sender
 from lead_engine.collectors import COLLECTORS
 from lead_engine.db import SessionLocal, init_db
 from lead_engine.models import Company, Draft
@@ -70,6 +74,20 @@ def main(argv: list[str] | None = None) -> None:
     rj = sub.add_parser("reject", help="reject a draft")
     rj.add_argument("draft_id", type=int)
     rj.add_argument("--reason", required=True)
+
+    se = sub.add_parser("send", help="send approved drafts (default mode: SEND_MODE in .env, else dry_run)")
+    se.add_argument("--mode", choices=["dry_run", "test", "live"])
+    se.add_argument("--limit", type=int)
+    se.add_argument("--confirm-live", action="store_true", help="required to send to real recipients")
+
+    sub.add_parser("send-status", help="outbox, daily cap and suppression counts")
+
+    ci = sub.add_parser("check-inbox", help="record replies, unsubscribes and bounces (read-only)")
+    ci.add_argument("--days", type=int, default=14)
+
+    su = sub.add_parser("suppress", help="never email this address (or @domain.com) again")
+    su.add_argument("email")
+    su.add_argument("--reason", default="manual")
 
     t = sub.add_parser("top", help="list best leads")
     t.add_argument("--route", choices=["high", "review", "archive"])
@@ -129,6 +147,25 @@ def main(argv: list[str] | None = None) -> None:
             except ValueError as exc:
                 raise SystemExit(str(exc))
             print(f"draft {d.id} {d.status}")
+        elif args.cmd == "send":
+            mode = args.mode or env("SEND_MODE", "dry_run")
+            if mode == "live" and not args.confirm_live:
+                raise SystemExit("live mode emails real people: re-run with --confirm-live")
+            try:
+                dump(sender.send_approved(session, mode, args.limit))
+            except RuntimeError as exc:
+                raise SystemExit(str(exc))
+        elif args.cmd == "send-status":
+            dump(sender.send_status(session))
+        elif args.cmd == "check-inbox":
+            try:
+                dump(inbox.check_inbox(session, args.days))
+            except (RuntimeError, OSError) as exc:
+                raise SystemExit(f"inbox check failed: {exc}")
+        elif args.cmd == "suppress":
+            added = sender.suppress(session, args.email, args.reason)
+            session.commit()
+            print(f"{args.email} {'suppressed' if added else 'was already suppressed'}")
         elif args.cmd == "top":
             rows = queries.search_leads(session, args.segment, args.route, limit=args.limit)
             print(f"{'id':>4}  {'route':7} {'prio':>5} {'fit':>5} {'int':>5} {'con':>5}  company")

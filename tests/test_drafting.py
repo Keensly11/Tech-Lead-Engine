@@ -113,11 +113,44 @@ def test_generate_draft_uses_template_and_signal(session):
     assert d.status == "draft" and d.issues == []
     assert d.to_email == "maya.r@falconpixel.example"
     assert d.body.startswith("Hi Maya,")
-    assert "cameras, lenses & AV equipment and editing & rendering workstations" in d.body
-    assert "https://gulftech.example" in d.body and 'Reply "unsubscribe"' in d.body
-    assert "(news.example)" in d.body
+    assert "We supply cameras, lenses and AV gear, plus editing workstations to companies" in d.body
+    # a normal signature, not a Website:/Phone:/Email: block, and a friendly P.S. instead of a footer
+    assert d.body.endswith(
+        "Best regards,\nGulf Tech Supply Sales\n+971 4 123 4567\ngulftech.example\n\n" + drafting.OPT_OUT)
+    assert "Website:" not in d.body and "unsubscribe" not in d.body.lower() and "---" not in d.body
     # the prompt is grounded in the strongest signal, with the publisher suffix stripped
     assert "begins filming feature series at new Abu Dhabi soundstage" in llm.calls[0]
+
+
+@pytest.mark.parametrize("opener,subject,exp_opener,exp_subject", [
+    ("Saw your new office — congrats. Offices need laptops.", "New Abu Dhabi office - IT infrastructure considerations",
+     "Saw your new office, congrats. Offices need laptops.", "New Abu Dhabi office"),
+    ("Saw the news – nice one.", "Expansion in Abu Dhabi: next steps", "Saw the news, nice one.", "Expansion in Abu Dhabi"),
+    ("A well-known firm.", "your new office.", "A well-known firm.", "your new office"),
+])
+def test_humanize_removes_dashes_and_headline_subjects(opener, subject, exp_opener, exp_subject):
+    c = drafting.humanize(copy(opener=opener, subject=subject))
+    assert (c.opener, c.subject) == (exp_opener, exp_subject)
+
+
+def test_headline_length_subject_is_flagged():
+    c = copy(subject="Supporting the next phase of growth at your brand new Abu Dhabi soundstage")
+    assert any("words" in i for i in check_copy(c, SOURCE, PRODUCTS))
+
+
+@pytest.mark.parametrize("items,expected", [
+    (["servers and networking gear"], "servers and networking gear"),
+    (["laptops", "monitors"], "laptops and monitors"),
+    (["laptops and desktops", "servers and networking gear"], "laptops and desktops, plus servers and networking gear"),
+])
+def test_join_naturally(items, expected):
+    assert drafting.join_naturally(items) == expected
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://fosutog.com", "fosutog.com"), ("https://www.fosutog.com/", "fosutog.com"), ("fosutog.com", "fosutog.com")])
+def test_website_display(url, expected):
+    assert drafting._website_display(url) == expected
 
 
 def test_filler_and_speculation_are_flagged():
@@ -140,17 +173,17 @@ def test_tender_draft_pitches_what_the_tender_names(session):
                         focus=("Servers, storage & networking",)))  # model picks the wrong line
     report = drafting.draft_leads(session, company_ids=[northwind.id], llm=llm)
     body = session.get(Draft, report[0]["draft_id"]).body
-    assert "a UAE supplier of laptops & desktops and monitors, docks & peripherals" in body
+    assert "We supply laptops and desktops, plus monitors and accessories" in body
     assert "servers" not in body
     assert "Products we could offer: Laptops & desktops; Monitors, docks & peripherals" in llm.calls[0]
 
 
-def test_greeting_drops_legal_suffix_and_acronyms_keep_capitals(session):
+def test_shared_inbox_gets_a_plain_greeting_and_acronyms_keep_capitals(session):
     duneline = session.scalar(select(Company).where(Company.domain == "duneline.example"))
     report = drafting.draft_leads(session, company_ids=[duneline.id], llm=fake_llm())
     body = session.get(Draft, report[0]["draft_id"]).body
-    assert body.startswith("Hello Duneline Logistics team,")
-    assert "because Duneline Logistics was in the news" in body
+    assert body.startswith("Hi there,")  # "Hello Duneline Logistics L.L.C team" read like a mail merge
+    assert "L.L.C" not in body
     assert drafting.label_in_sentence("Cameras, lenses & AV equipment") == "cameras, lenses & AV equipment"
 
 
@@ -166,14 +199,10 @@ def test_display_name(name, expected):
     assert display_name(name) == expected
 
 
-def test_footer_names_publisher_from_headline_suffix():
-    from lead_engine.models import Signal
-    s = Signal(title="Brain Digits opens new office in Abu Dhabi - TradeArabia",
-               url="https://news.google.com/rss/articles/abc")
-    assert drafting._publisher(s) == "TradeArabia"
-    assert drafting._clean_title(s.title) == "Brain Digits opens new office in Abu Dhabi"
-    s.title = "No publisher suffix here"
-    assert drafting._publisher(s) == "news.google.com"
+def test_clean_title_drops_publisher_suffix():
+    assert drafting._clean_title("Brain Digits opens new office in Abu Dhabi - TradeArabia") == \
+        "Brain Digits opens new office in Abu Dhabi"
+    assert drafting._clean_title("No publisher suffix here") == "No publisher suffix here"
 
 
 def test_invalid_product_focus_falls_back_to_lead_products(session):
@@ -181,7 +210,7 @@ def test_invalid_product_focus_falls_back_to_lead_products(session):
     report = drafting.draft_leads(session, company_ids=[falcon(session).id], llm=llm)
     d = session.get(Draft, report[0]["draft_id"])
     assert "drones" not in d.body.lower()
-    assert "a UAE supplier of laptops & desktops" in d.body
+    assert "We supply laptops and desktops" in d.body
 
 
 def test_placeholder_sender_is_flagged_and_blocks_approval(session, monkeypatch):
@@ -234,7 +263,7 @@ def test_approve_reject_edit(session):
                                 regenerate=True, llm=fake_llm()) == []
 
     drafting.edit_draft(session, c, body="Hello, no opt-out here.")
-    with pytest.raises(ValueError, match="unsubscribe"):
+    with pytest.raises(ValueError, match="opt-out"):
         drafting.approve_draft(session, c)
 
     pending = {d["draft_id"] for d in drafting.list_drafts(session)}

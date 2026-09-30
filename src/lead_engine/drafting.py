@@ -31,43 +31,59 @@ from lead_engine.settings import CONFIG_DIR, load_config
 log = logging.getLogger(__name__)
 
 ACTIVE = ("draft", "needs_review", "approved")
-MAX_OPENER_WORDS = 60
-MAX_SUBJECT_CHARS = 70
+MAX_OPENER_WORDS = 45
+MAX_SUBJECT_CHARS = 50
+MAX_SUBJECT_WORDS = 7
+# A plain-language opt-out. It reads like a person, not a mailing list; the inbox
+# checker treats replies like "not relevant" or "please remove us" as opt-outs.
+OPT_OUT = "P.S. If this isn't relevant for you, just let us know and we won't reach out again."
+OPT_OUT_MARKERS = ("won't reach out", "unsubscribe")
 ROLE_PREFERENCE = {"Procurement": 0, "IT": 1, "Sales": 3, "Administration": 3, "Office": 3}
 
 # Words the opener may use even though they aren't in the article.
 ALLOWED_WORDS = {
     "uae", "dubai", "abu", "dhabi", "sharjah", "ajman", "emirates", "middle", "east", "gcc",
-    "congratulations", "congrats", "it", "av", "pc", "pcs",
+    "congratulations", "congrats", "it", "av", "pc", "pcs", "saw", "i",
 }
 BANNED = re.compile(
     r"\b(free|discounts?|cheapest|lowest|best price|guarantee[ds]?|limited[- ]time|offer expires|"
     r"special offer|deal|promo(tion)?|save \d+)\b|%|\baed\s?\d|\$\s?\d|\busd\s?\d",
     re.I,
 )
-# Empty or speculative phrases: they add nothing, or claim things the article doesn't say.
+# Empty, speculative or typically machine-written phrases. They add nothing, claim
+# things the article doesn't say, or make the email read like a template.
 FILLER = re.compile(
     r"\b(strategic|excited|curious|seamless(ly)?|cutting[- ]edge|state[- ]of[- ]the[- ]art|"
-    r"world[- ]class|synerg\w*|game[- ]chang\w*|leverag\w*|increasing demands|come to life)\b",
+    r"world[- ]class|synerg\w*|game[- ]chang\w*|leverag\w*|increasing demands|come to life|"
+    r"robust|streamlin\w*|elevat\w*|empower\w*|delve|tailored|solutions?|infrastructure needs|"
+    r"in today's|look no further|rest assured|i hope this (email|message) finds you)\b",
     re.I,
 )
 PLACEHOLDER_MARKERS = ("YOUR COMPANY NAME", "example.com", "+971 00 000 0000")
 
-PROMPT = """You write the opening of a short B2B sales email for {sender}, a UAE supplier of IT and AV equipment.
+PROMPT = """You're a salesperson at {sender}, a UAE supplier of IT and AV equipment, writing a quick,
+friendly note to a company you just read about. Write the way a real person types an email: short,
+plain words, no buzzwords, nothing that sounds like marketing copy.
 
-Recipient company: {company}
-News about them: "{title}"
-Evidence: "{evidence}"
+Their company: {company}
+The news: "{title}"
+Detail: "{evidence}"
 Products we could offer: {labels}
 
 Write:
 - product_focus: the 1-2 most relevant product labels from the list above, copied exactly.
-- opener: exactly 2 short sentences.
-  Sentence 1 restates their news plainly, using only facts above (e.g. "Congratulations on opening your new Abu Dhabi office.").
-  Sentence 2 links that news to the equipment in product_focus (e.g. "New offices usually mean new laptops and screens for the team.").
-  No opinions or guesses about their strategy, no "we're excited", no prices, discounts, offers or promises.
-  No greeting, no sign-off, no company name of ours.
-- subject: under 70 characters, sentence case, specific to their news, plain and not salesy, no emojis.
+- opener: exactly 2 short sentences, under 35 words in total.
+  Sentence 1 mentions their news casually, using only facts above.
+    Good: "Saw that you've just opened a new office in Abu Dhabi, congrats."
+    Good: "Saw the news about your tender for 400 student laptops and classroom displays."
+  Sentence 2 makes one practical link to equipment, the way a person would say it.
+    Good: "Setting up a new office usually means a lot of laptops and screens to sort out."
+  The examples show the tone only: write your own sentences about THIS news, never copy the examples.
+  Don't write "Congratulations on", "I hope this email finds you well", "solutions" or "infrastructure needs".
+  No opinions about their strategy, no prices, discounts, offers or promises.
+  No greeting, no sign-off, no dashes.
+- subject: 2 to 6 words, lowercase except names, like a colleague would write. No dashes or colons.
+    Good: "your new Abu Dhabi office"   Good: "laptops for the new office"
 """
 
 LLM = Callable[[str, type[DraftCopy], httpx.Client | None], DraftCopy | None]
@@ -113,18 +129,9 @@ def sender_details() -> dict:
     return details
 
 
-_PUBLISHER_SUFFIX = re.compile(r"\s+-\s+([^-]{2,60})$")
-
-
 def _clean_title(title: str) -> str:
     """Drop the ' - Publisher' suffix news feeds add to headlines."""
-    return _PUBLISHER_SUFFIX.sub("", title).strip()
-
-
-def _publisher(signal: Signal) -> str:
-    """'… opens new office in Abu Dhabi - TradeArabia' → 'TradeArabia'; else the link's host."""
-    m = _PUBLISHER_SUFFIX.search(signal.title)
-    return m.group(1).strip() if m else (urlparse(signal.url).hostname or "the news")
+    return re.sub(r"\s+-\s+[^-]{2,60}$", "", title).strip()
 
 
 def sentence_case(text: str, sources: list[str]) -> str:
@@ -164,6 +171,25 @@ def label_in_sentence(label: str) -> str:
     return " ".join(w if w.isupper() and len(w) > 1 else w.lower() for w in label.split())
 
 
+def spoken(label: str, products: dict | None = None) -> str:
+    """How a person would say a product line: 'Servers, storage & networking' → 'servers and networking gear'."""
+    products = products or load_config("products")
+    for line in products["product_lines"].values():
+        if line["label"] == label and line.get("spoken"):
+            return line["spoken"]
+    return label_in_sentence(label)
+
+
+def join_naturally(items: list[str]) -> str:
+    """['laptops', 'monitors'] → 'laptops and monitors'; but when an item already has
+    'and' or a comma, 'laptops and desktops, plus monitors and accessories'."""
+    if len(items) < 2:
+        return "".join(items)
+    if any("," in i or " and " in i for i in items):
+        return ", plus ".join(items)
+    return " and ".join(items)
+
+
 def _word(w: str) -> str:
     """Normalise a token: drop possessives and trailing punctuation ("Digits’s" → "digits")."""
     return re.sub(r"(['’]s?|[-&])$", "", w)
@@ -183,6 +209,8 @@ def check_copy(copy: DraftCopy, sources: list[str], allowed_products: list[str])
         issues.append("subject is empty")
     if len(copy.subject) > MAX_SUBJECT_CHARS:
         issues.append(f"subject longer than {MAX_SUBJECT_CHARS} characters")
+    if len(copy.subject.split()) > MAX_SUBJECT_WORDS:
+        issues.append(f"subject longer than {MAX_SUBJECT_WORDS} words (reads like a headline)")
     if len(copy.opener.split()) > MAX_OPENER_WORDS:
         issues.append(f"opener longer than {MAX_OPENER_WORDS} words")
 
@@ -207,28 +235,42 @@ def check_copy(copy: DraftCopy, sources: list[str], allowed_products: list[str])
     return list(dict.fromkeys(issues))
 
 
+def humanize(copy: DraftCopy) -> DraftCopy:
+    """Remove the tells of machine-written text that the prompt doesn't always prevent.
+
+    Dashes become commas; a headline-style subject ("New office - IT considerations")
+    keeps only its first part.
+    """
+    copy.opener = re.sub(r"\s*[—–]\s*|\s+-\s+", ", ", copy.opener.strip())
+    copy.opener = re.sub(r",\s*,", ",", copy.opener)
+    subject = re.split(r"\s+[-—–]\s+|\s*[—–]\s*|:\s+", copy.subject.strip())[0]
+    copy.subject = subject.rstrip(".!?, ")
+    return copy
+
+
+def _website_display(url: str) -> str:
+    """'https://fosutog.com/' → 'fosutog.com', the way people write it in a signature."""
+    return (urlparse(url if "://" in url else f"https://{url}").hostname or url).removeprefix("www.")
+
+
 def render(copy: DraftCopy, company: Company, contact: Contact, signal: Signal, sender: dict) -> tuple[str, str]:
+    """A short, plain email a person would write: one ask, a normal signature, a friendly opt-out."""
     if contact.kind == "verified" and contact.name:
         greeting = f"Hi {contact.name.split()[0]},"
-    elif contact.kind == "generic":
-        greeting = f"Hello {display_name(company.name)} team,"
     else:
-        greeting = "Hello,"
+        greeting = "Hi there,"
 
-    focus = " and ".join(label_in_sentence(p) for p in copy.product_focus)
-    source = _publisher(signal)
+    focus = join_naturally([spoken(p) for p in copy.product_focus])
     body = (
         f"{greeting}\n\n"
         f"{copy.opener.strip()}\n\n"
-        f"We're {sender['name']}, a UAE supplier of {focus}. If new equipment is on your list, "
-        f"I'd be glad to share options and a quote for your team.\n\n"
-        f"Website: {sender['website']}\n"
-        f"Phone: {sender['phone']}\n"
-        f"Email: {sender['email']}\n\n"
-        f"Best regards,\n{sender['signature']}\n\n"
-        f"---\n"
-        f"You're receiving this because {display_name(company.name)} was in the news ({source}). "
-        f"Reply \"unsubscribe\" and we won't contact you again."
+        f"We're {sender['name']}. We supply {focus} to companies across the UAE. "
+        f"Would it help if we put together a few options and a quick quote for you?\n\n"
+        f"Best regards,\n"
+        f"{sender['signature']}\n"
+        f"{sender['phone']}\n"
+        f"{_website_display(sender['website'])}\n\n"
+        f"{OPT_OUT}"
     )
     return copy.subject.strip(), body
 
@@ -260,6 +302,7 @@ def generate_draft(session: Session, company: Company, llm: LLM = ollama_json,
         copy.product_focus = [by_lower[p.lower()] for p in copy.product_focus if p.lower() in by_lower][:2] or labels[:2]
 
     sources = [signal.title, signal.evidence or "", company.name]
+    copy = humanize(copy)
     copy.subject = sentence_case(copy.subject, sources)
     issues = check_copy(copy, sources, labels)
     if any(m in str(sender) for m in PLACEHOLDER_MARKERS):
@@ -336,8 +379,8 @@ def approve_draft(session: Session, draft_id: int, note: str | None = None) -> D
     if any(m in d.body for m in PLACEHOLDER_MARKERS):
         raise ValueError("can't approve: the email still contains placeholder company details. "
                          "Fill in config/products.yaml and regenerate, or edit the body")
-    if "unsubscribe" not in d.body.lower():
-        raise ValueError("can't approve: the email must keep the unsubscribe line")
+    if not any(m in d.body.lower() for m in OPT_OUT_MARKERS):
+        raise ValueError("can't approve: the email must keep the opt-out line (the P.S.)")
     d.status, d.reviewer_note, d.reviewed_at = "approved", note or d.reviewer_note, datetime.now(timezone.utc)
     session.commit()
     return d

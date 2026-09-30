@@ -6,9 +6,9 @@ way, so each company is exported once (supports_updates = False). Later score
 changes stay visible in our own DB and the MCP tools.
 """
 
-import smtplib
 from email.message import EmailMessage
 
+from lead_engine.sender import SmtpTransport
 from lead_engine.settings import env
 from lead_engine.sinks.base import LeadPayload
 
@@ -18,24 +18,17 @@ class OdooEmailAliasSink:
     supports_updates = False
 
     def __init__(self):
-        self.host = env("SMTP_HOST")
-        self.port = int(env("SMTP_PORT", "587"))
-        self.user = env("SMTP_USER")
-        self.password = env("SMTP_PASSWORD")
         self.alias = env("ODOO_LEAD_ALIAS")
-        if not all([self.host, self.user, self.password, self.alias]):
-            raise RuntimeError("Set SMTP_HOST, SMTP_USER, SMTP_PASSWORD and ODOO_LEAD_ALIAS in .env")
+        if not self.alias:
+            raise RuntimeError("Set ODOO_LEAD_ALIAS in .env")
+        self.transport = SmtpTransport()  # SSL on 465 or STARTTLS on 587
 
     def upsert_lead(self, lead: LeadPayload) -> str:
         title = lead.product_lines[0] if lead.product_lines else "IT equipment"
         msg = EmailMessage()
-        msg["From"] = self.user
+        msg["From"] = self.transport.user
         msg["To"] = self.alias
         msg["Subject"] = f"[{lead.route.upper()} {lead.priority:.2f}] {lead.company_name}: {title}"
         msg.set_content(lead.render_text())
-
-        with smtplib.SMTP(self.host, self.port, timeout=30) as smtp:
-            smtp.starttls()
-            smtp.login(self.user, self.password)
-            smtp.send_message(msg)
+        self.transport.send(msg)
         return msg["Subject"]
